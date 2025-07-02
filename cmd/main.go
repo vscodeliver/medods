@@ -1,3 +1,8 @@
+// @securityDefinitions.apiKey AccessToken
+// @in header
+// @name Authorization
+// @description Enter your bearer token in the format **Bearer &lt;token>**
+
 package main
 
 import (
@@ -13,6 +18,10 @@ import (
 	"medods/internal/utils"
 
 	"github.com/gorilla/mux"
+
+	_ "medods/docs"
+
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 func main() {
@@ -47,6 +56,8 @@ func main() {
 	mux.Handle("/auth/me", middleware.AuthMiddleware(http.HandlerFunc(h.Me))).Methods("GET")
 	mux.Handle("/auth/logout", middleware.AuthMiddleware(http.HandlerFunc(h.Logout))).Methods("GET")
 	mux.Handle("/auth/refresh/{userId}", middleware.AuthMiddleware(http.HandlerFunc(h.RefreshToken))).Methods("POST")
+
+	mux.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)
 
 	log.Println("Server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", mux))

@@ -1,0 +1,140 @@
+definitions:
+  handlers.refreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    type: object
+  handlers.tokenResponse:
+    properties:
+      access_token:
+        type: string
+      refresh_token:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /auth/logout:
+    get:
+      description: Blacklists current access token and deletes user session.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'message: logged out'
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: token has no jti
+          schema:
+            type: string
+        "401":
+          description: missing or invalid authorization header or token
+          schema:
+            type: string
+        "500":
+          description: server error or redis error
+          schema:
+            type: string
+      security:
+      - AccessToken: []
+      summary: Logout current user and blacklist access token
+      tags:
+      - auth
+  /auth/me:
+    get:
+      description: Extracts user ID from access token and returns it.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: user_id returned
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: missing token or invalid token
+          schema:
+            type: string
+      security:
+      - AccessToken: []
+      summary: Get info about current authenticated user
+      tags:
+      - auth
+  /auth/refresh/{userId}:
+    post:
+      consumes:
+      - application/json
+      description: Validates refresh token and user ID, issues new tokens.
+      parameters:
+      - description: User ID (GUID)
+        in: path
+        name: userId
+        required: true
+        type: string
+      - description: Refresh token request body
+        in: body
+        name: refreshRequest
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.refreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.tokenResponse'
+        "400":
+          description: invalid refresh request
+          schema:
+            type: string
+        "401":
+          description: invalid or expired refresh token / unauthorized device
+          schema:
+            type: string
+      security:
+      - AccessToken: []
+      summary: Refresh access and refresh tokens using refresh token and user ID
+      tags:
+      - auth
+  /auth/token/{userId}:
+    post:
+      consumes:
+      - application/json
+      description: Generates JWT access token and refresh token session. If user does
+        not exist, creates user with given userId.
+      parameters:
+      - description: User ID (GUID)
+        in: path
+        name: userId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.tokenResponse'
+        "400":
+          description: missing user id
+          schema:
+            type: string
+        "500":
+          description: internal server error
+          schema:
+            type: string
+      summary: Generate access and refresh tokens for a user by user ID
+      tags:
+      - auth
+securityDefinitions:
+  AccessToken:
+    description: Enter your bearer token in the format **Bearer &lt;token>**
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
