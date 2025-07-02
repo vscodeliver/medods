@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: medods
+      POSTGRES_PASSWORD: medods123
+      POSTGRES_DB: medods_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medods"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://medods:medods123@db:5432/medods?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+volumes:
+  pgdata:
+
+networks:
+  backend:

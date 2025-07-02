@@ -1,0 +1,89 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2025-07-01T10:00:00.000Z",
+  "__export_source": "insomnia.desktop.app",
+  "resources": [
+    {
+      "_id": "req_register",
+      "_type": "request",
+      "name": "Register",
+      "method": "POST",
+      "url": "http://localhost:8080/api/register",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"123456\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_login",
+      "_type": "request",
+      "name": "Login",
+      "method": "POST",
+      "url": "http://localhost:8080/api/login",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"123456\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_refresh",
+      "_type": "request",
+      "name": "Refresh Token",
+      "method": "POST",
+      "url": "http://localhost:8080/api/refresh",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"refresh_token\": \"<PASTE_REFRESH_TOKEN_HERE>\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    {
+      "_id": "req_me",
+      "_type": "request",
+      "name": "Get Me",
+      "method": "GET",
+      "url": "http://localhost:8080/api/me",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer <PASTE_ACCESS_TOKEN_HERE>"
+        }
+      ]
+    },
+    {
+      "_id": "req_logout",
+      "_type": "request",
+      "name": "Logout",
+      "method": "POST",
+      "url": "http://localhost:8080/api/logout",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"refresh_token\": \"<PASTE_REFRESH_TOKEN_HERE>\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    }
+  ]
+}
