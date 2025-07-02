@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -140,4 +141,13 @@ func SendIPAlertWebhook(userID, newIP, userAgent string) error {
 	}
 
 	return nil
+}
+
+func GetIPFromRequest(r *http.Request) string {
+	ip := r.Header.Get("X-Real-IP")
+	if ip != "" {
+		return ip
+	}
+	ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+	return ip
 }

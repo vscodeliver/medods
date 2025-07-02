@@ -1,16 +1,20 @@
+// internal/handlers/auth.go
+
 package handlers
 
 import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"medods/internal/models"
 	"medods/internal/utils"
-	"net"
 	"net/http"
 	"strings"
 	"time"
-	"log"
+
+	"github.com/gorilla/mux"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Handler struct {
@@ -21,110 +25,157 @@ func NewHandler(db *sql.DB) *Handler {
 	return &Handler{DB: db}
 }
 
-type registerRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
+// type tokenRequest struct {
+// 	ID string `json:"id"` // GUID пользователя
+// }
 
-func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	_, err := models.GetUserByEmail(h.DB, req.Email)
-	if err == nil {
-		http.Error(w, "email already in use", http.StatusBadRequest)
-		return
-	}
-
-	hashedPassword, err := utils.HashPassword(req.Password)
-	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	user := &models.User{
-		ID:           utils.GenerateUUID(),
-		Email:        req.Email,
-		PasswordHash: hashedPassword,
-		CreatedAt:    time.Now(),
-	}
-
-	if err := models.InsertUser(h.DB, user); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
-		"id":    user.ID,
-		"email": user.Email,
-	})
-}
-
-type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type loginResponse struct {
+type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	SessionID    string `json:"session_id"`
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+func (h *Handler) GenerateToken(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["userId"]
+
+	if userID == "" {
+		http.Error(w, "missing user id", http.StatusBadRequest)
 		return
 	}
 
-	user, err := models.GetUserByEmail(h.DB, req.Email)
+	ctx := r.Context()
+
+	exists, err := models.UserExists(ctx, h.DB, userID)
 	if err != nil {
-		http.Error(w, "invalid email or password", http.StatusUnauthorized)
+		log.Printf("error checking user existence: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	if !utils.CheckPasswordHash(req.Password, user.PasswordHash) {
-		http.Error(w, "invalid email or password", http.StatusUnauthorized)
-		return
+	if !exists {
+		err := models.CreateUserWithID(ctx, h.DB, userID)
+		if err != nil {
+			log.Printf("failed to create user: %v", err)
+			http.Error(w, "failed to create user", http.StatusInternalServerError)
+			return
+		}
 	}
 
-	accessToken, _, err := utils.GenerateAccessToken(user.ID)
+	accessToken, _, err := utils.GenerateAccessToken(userID)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
 		return
 	}
 
-	rawRefreshToken := utils.GenerateUUID()
-	hashedRefreshToken, err := utils.HashPassword(rawRefreshToken)
+	rawRefresh := utils.GenerateUUID()
+	hashedRefresh, err := utils.HashPassword(rawRefresh)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		http.Error(w, "failed to hash refresh token", http.StatusInternalServerError)
 		return
 	}
 
 	session := &models.Session{
 		ID:           utils.GenerateUUID(),
-		UserID:       user.ID,
-		RefreshToken: hashedRefreshToken,
+		UserID:       userID,
+		RefreshToken: hashedRefresh,
 		UserAgent:    r.Header.Get("User-Agent"),
-		IP:           getIPFromRequest(r),
-		ExpiresAt:    time.Now().Add(24 * time.Hour),
+		IP:           utils.GetIPFromRequest(r),
 		CreatedAt:    time.Now(),
+		ExpiresAt:    time.Now().Add(24 * time.Hour),
 	}
 
 	if err := models.InsertSession(h.DB, session); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
+		log.Printf("failed to store session: %v", err)
+		http.Error(w, "failed to store session", http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(loginResponse{
+	resp := tokenResponse{
 		AccessToken:  accessToken,
-		RefreshToken: base64.StdEncoding.EncodeToString([]byte(rawRefreshToken)),
-		SessionID:    session.ID,
+		RefreshToken: base64.StdEncoding.EncodeToString([]byte(rawRefresh)),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+
+	vars := mux.Vars(r)
+	userID := vars["userId"]
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" || userID == "" {
+		http.Error(w, "invalid refresh request", http.StatusBadRequest)
+		return
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(req.RefreshToken)
+	if err != nil {
+		http.Error(w, "invalid token encoding", http.StatusBadRequest)
+		return
+	}
+	rawToken := string(raw)
+
+	sessions, err := models.GetSessionsByUserID(h.DB, userID)
+	if err != nil || len(sessions) == 0 {
+		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
+		return
+	}
+
+	var session *models.Session
+	for _, s := range sessions {
+		if bcrypt.CompareHashAndPassword([]byte(s.RefreshToken), []byte(rawToken)) == nil {
+			session = &s
+			break
+		}
+	}
+
+	if session == nil || session.ExpiresAt.Before(time.Now()) {
+		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
+		return
+	}
+
+	userAgent := r.Header.Get("User-Agent")
+	ip := utils.GetIPFromRequest(r)
+
+	if session.UserAgent != userAgent {
+		_ = models.DeleteSession(h.DB, session.ID)
+		http.Error(w, "unauthorized device", http.StatusUnauthorized)
+		return
+	}
+
+	if session.IP != ip {
+		go utils.SendIPAlertWebhook(session.UserID, ip, userAgent)
+	}
+
+	accessToken, _, err := utils.GenerateAccessToken(session.UserID)
+	if err != nil {
+		http.Error(w, "failed to generate access token", http.StatusInternalServerError)
+		return
+	}
+
+	newRaw := utils.GenerateUUID()
+	newHash, err := utils.HashPassword(newRaw)
+	if err != nil {
+		http.Error(w, "failed to hash new refresh token", http.StatusInternalServerError)
+		return
+	}
+
+	session.RefreshToken = newHash
+	session.ExpiresAt = time.Now().Add(24 * time.Hour)
+	if err := models.UpdateSession(h.DB, session); err != nil {
+		http.Error(w, "failed to update session", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(tokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: base64.StdEncoding.EncodeToString([]byte(newRaw)),
 	})
 }
 
@@ -180,7 +231,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Удаляем сессию пользователя по UserID, UserAgent и IP
-	err = models.DeleteSessionByUserID(h.DB, claims.UserID, r.Header.Get("User-Agent"), getIPFromRequest(r))
+	err = models.DeleteSessionByUserID(h.DB, claims.UserID, r.Header.Get("User-Agent"), utils.GetIPFromRequest(r))
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
@@ -188,88 +239,4 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "logged out"})
-}
-
-type refreshRequest struct {
-	SessionID    string `json:"session_id"`
-	RefreshToken string `json:"refresh_token"`
-}
-
-func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	var req refreshRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" || req.SessionID == "" {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(req.RefreshToken)
-	if err != nil {
-		http.Error(w, "invalid token encoding", http.StatusBadRequest)
-		return
-	}
-	rawToken := string(decoded)
-
-	session, err := models.GetSessionByID(h.DB, req.SessionID)
-	if err != nil {
-		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
-		return
-	}
-	if session == nil || session.ExpiresAt.Before(time.Now()) {
-		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
-		return
-	}
-
-	if !utils.CheckPasswordHash(rawToken, session.RefreshToken) {
-		http.Error(w, "invalid or expired refresh token", http.StatusUnauthorized)
-		return
-	}
-
-	userAgent := r.Header.Get("User-Agent")
-	ip := getIPFromRequest(r)
-
-	if session.UserAgent != userAgent {
-		_ = models.DeleteSession(h.DB, session.ID)
-		http.Error(w, "unauthorized device", http.StatusUnauthorized)
-		return
-	}
-
-	if session.IP != ip {
-		go utils.SendIPAlertWebhook(session.UserID, ip, userAgent)
-	}
-
-	newAccessToken, _, err := utils.GenerateAccessToken(session.UserID)
-	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	newRawRefresh := utils.GenerateUUID()
-	newHash, err := utils.HashPassword(newRawRefresh)
-	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	session.RefreshToken = newHash
-	session.ExpiresAt = time.Now().Add(24 * time.Hour)
-
-	if err := models.UpdateSession(h.DB, session); err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
-	}
-
-	json.NewEncoder(w).Encode(loginResponse{
-		AccessToken:  newAccessToken,
-		RefreshToken: base64.StdEncoding.EncodeToString([]byte(newRawRefresh)),
-		SessionID:    session.ID,
-	})
-}
-
-// getIPFromRequest extracts only the IP address without port
-func getIPFromRequest(r *http.Request) string {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return ip
 }
