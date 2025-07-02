@@ -29,15 +29,28 @@ func NewHandler(db *sql.DB) *Handler {
 // 	ID string `json:"id"` // GUID пользователя
 // }
 
+// tokenResponse represents tokens returned to client
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
 
+// refreshRequest represents refresh token request body
 type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+// GenerateToken godoc
+// @Summary Generate access and refresh tokens for a user by user ID
+// @Description Generates JWT access token and refresh token session. If user does not exist, creates user with given userId.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param userId path string true "User ID (GUID)"
+// @Success 200 {object} tokenResponse
+// @Failure 400 {string} string "missing user id"
+// @Failure 500 {string} string "internal server error"
+// @Router /auth/token/{userId} [post]
 func (h *Handler) GenerateToken(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
@@ -103,6 +116,19 @@ func (h *Handler) GenerateToken(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
+// RefreshToken godoc
+// @Summary Refresh access and refresh tokens using refresh token and user ID
+// @Description Validates refresh token and user ID, issues new tokens.
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param userId path string true "User ID (GUID)"
+// @Param refreshRequest body refreshRequest true "Refresh token request body"
+// @Success 200 {object} tokenResponse
+// @Failure 400 {string} string "invalid refresh request"
+// @Failure 401 {string} string "invalid or expired refresh token / unauthorized device"
+// @Security AccessToken
+// @Router /auth/refresh/{userId} [post]
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 
@@ -179,6 +205,15 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Me godoc
+// @Summary Get info about current authenticated user
+// @Description Extracts user ID from access token and returns it.
+// @Tags auth
+// @Produce json
+// @Success 200 {object} map[string]string "user_id returned"
+// @Failure 401 {string} string "missing token or invalid token"
+// @Security AccessToken
+// @Router /auth/me [get]
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
@@ -196,6 +231,17 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"user_id": claims.UserID})
 }
 
+// Logout godoc
+// @Summary Logout current user and blacklist access token
+// @Description Blacklists current access token and deletes user session.
+// @Tags auth
+// @Produce json
+// @Success 200 {object} map[string]string "message: logged out"
+// @Failure 400 {string} string "token has no jti"
+// @Failure 401 {string} string "missing or invalid authorization header or token"
+// @Failure 500 {string} string "server error or redis error"
+// @Security AccessToken
+// @Router /auth/logout [get]
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
